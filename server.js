@@ -551,7 +551,22 @@ async function handleImagesToPdf(req, res) {
       return sendJson(res, 500, { ok: false, error: "magick.exe not found" });
     }
 
-    const args = [...imagePaths, outputPath];
+    const a4Width = 2480;
+    const a4Height = 3508;
+    const args = [
+      "-units",
+      "PixelsPerInch",
+      "-density",
+      "300",
+      ...imagePaths,
+      "-resize",
+      `${a4Width}x${a4Height}^`,
+      "-gravity",
+      "center",
+      "-extent",
+      `${a4Width}x${a4Height}`,
+      outputPath,
+    ];
     await runProcess(magickPath, args);
 
     const relativePath = path.relative(ROOT, outputPath).replace(/\\/g, "/");
