@@ -295,6 +295,32 @@ body {
   gap: 0.6rem;
 }
 
+.session-card-cover {
+  width: 100%;
+  height: 140px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 0.8rem;
+}
+
+.session-card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.session-card-placeholder {
+  font-size: 2.25rem;
+  font-weight: 700;
+  color: #475569;
+  letter-spacing: 0.08em;
+}
+
 .session-card-title {
   font-size: 0.9rem;
   font-weight: 600;

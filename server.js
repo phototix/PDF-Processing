@@ -85,6 +85,11 @@ const server = https.createServer(
       return sendJson(res, 200, payload);
     }
 
+    if (req.method === "GET" && pathname === "/api/sessions/details") {
+      const payload = listSessionDetails();
+      return sendJson(res, 200, payload);
+    }
+
     if (req.method === "POST" && pathname === "/api/sessions/rename") {
       return handleRenameSession(req, res);
     }
@@ -137,6 +142,10 @@ const server = https.createServer(
 
     if (req.method === "POST" && pathname === "/api/arrange") {
       return handleArrangePages(req, res);
+    }
+
+    if (req.method === "POST" && pathname === "/api/move") {
+      return handleMovePdf(req, res);
     }
 
     res.writeHead(404, { "Content-Type": "application/json" });
@@ -333,6 +342,19 @@ function ensureSessionDir(sessionId) {
   return sessionDir;
 }
 
+function ensureSessionPathDir(sessionId) {
+  const safe = sanitizeSessionPath(sessionId);
+  if (!safe) {
+    return null;
+  }
+  const sessionDir = path.resolve(SESSIONS_ROOT, safe);
+  if (!sessionDir.startsWith(SESSIONS_ROOT + path.sep)) {
+    return null;
+  }
+  ensureDir(sessionDir);
+  return sessionDir;
+}
+
 function listPdfFiles(sessionId, filter) {
   const items = [];
   const mode = (filter || "all").toLowerCase();
@@ -401,6 +423,54 @@ function listSessionFolders() {
 
   const items = listSessionFoldersRecursive(SESSIONS_ROOT, "").sort((a, b) => a.localeCompare(b));
   return { ok: true, items };
+}
+
+function listSessionDetails() {
+  const sessions = listSessionFolders().items || [];
+  const items = sessions.map((sessionId) => {
+    const sessionDir = path.join(SESSIONS_ROOT, sessionId);
+    const coverPath = findLatestImage(sessionDir);
+    const coverRelative = coverPath ? path.relative(ROOT, coverPath).replace(/\\/g, "/") : null;
+    return {
+      id: sessionId,
+      coverUrl: coverRelative ? `/files/${coverRelative}` : null,
+    };
+  });
+
+  return { ok: true, items };
+}
+
+function findLatestImage(rootDir) {
+  if (!fs.existsSync(rootDir)) {
+    return null;
+  }
+
+  const images = listFiles(rootDir, (filePath) => {
+    const ext = path.extname(filePath).toLowerCase();
+    return ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".webp";
+  });
+
+  if (!images.length) {
+    return null;
+  }
+
+  let latestPath = images[0];
+  let latestTime = 0;
+
+  images.forEach((filePath) => {
+    try {
+      const stats = fs.statSync(filePath);
+      const mtime = stats.mtimeMs || stats.mtime.getTime();
+      if (mtime > latestTime) {
+        latestTime = mtime;
+        latestPath = filePath;
+      }
+    } catch (error) {
+      // ignore unreadable files
+    }
+  });
+
+  return latestPath;
 }
 
 function listSessionFoldersRecursive(rootDir, relativeBase) {
@@ -1155,6 +1225,49 @@ async function handleArrangePages(req, res) {
   } catch (error) {
     logToFile("arrange:handler-error", { error: error?.message || error });
     return sendJson(res, 500, { ok: false, error: error.message || "Arrange failed" });
+  }
+}
+
+async function handleMovePdf(req, res) {
+  try {
+    const body = await readBody(req);
+    const payload = JSON.parse(body || "{}");
+    const inputPath = resolveAllowedPdfPath(payload.file);
+    if (!inputPath) {
+      return sendJson(res, 400, { ok: false, error: "Invalid PDF file" });
+    }
+
+    const sessionId = sanitizeSessionPath(payload.sessionId || "");
+    const targetDir = ensureSessionPathDir(sessionId);
+    if (!targetDir) {
+      return sendJson(res, 400, { ok: false, error: "Invalid destination session" });
+    }
+
+    const filename = path.basename(inputPath);
+    const outputPath = path.join(targetDir, filename);
+
+    if (path.resolve(outputPath) === path.resolve(inputPath)) {
+      const relativePath = path.relative(ROOT, inputPath).replace(/\\/g, "/");
+      return sendJson(res, 200, { ok: true, output: buildFileInfo(inputPath, relativePath, "session") });
+    }
+
+    if (fs.existsSync(outputPath)) {
+      return sendJson(res, 400, { ok: false, error: "File already exists in destination" });
+    }
+
+    fs.renameSync(inputPath, outputPath);
+
+    const oldThumb = getThumbnailPath(inputPath);
+    const newThumb = getThumbnailPath(outputPath);
+    if (oldThumb && newThumb && fs.existsSync(oldThumb)) {
+      ensureDir(path.dirname(newThumb));
+      fs.renameSync(oldThumb, newThumb);
+    }
+
+    const relativePath = path.relative(ROOT, outputPath).replace(/\\/g, "/");
+    return sendJson(res, 200, { ok: true, output: buildFileInfo(outputPath, relativePath, "session") });
+  } catch (error) {
+    return sendJson(res, 500, { ok: false, error: error.message || "Move failed" });
   }
 }
 

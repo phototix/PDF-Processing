@@ -32,6 +32,8 @@ const elements = {
   previewTitle: document.getElementById("previewTitle"),
   previewFrame: document.getElementById("previewFrame"),
   previewArrange: document.getElementById("previewArrange"),
+  moveSessionSelect: document.getElementById("moveSessionSelect"),
+  moveConfirmBtn: document.getElementById("moveConfirmBtn"),
   previewRotateLeft: document.getElementById("previewRotateLeft"),
   previewRotateRight: document.getElementById("previewRotateRight"),
   arrangeGrid: document.getElementById("arrangeGrid"),
@@ -156,6 +158,7 @@ function init() {
   elements.sessionFilter.addEventListener("change", refreshPdfs);
   elements.refreshPathsBtn.addEventListener("click", refreshSessions);
   elements.previewArrange.addEventListener("click", openArrangeModal);
+  elements.moveConfirmBtn.addEventListener("click", handleMovePdf);
   elements.previewRotateLeft.addEventListener("click", () => rotatePreview("ccw"));
   elements.previewRotateRight.addEventListener("click", () => rotatePreview("cw"));
   elements.arrangeConfirm.addEventListener("click", submitArrange);
@@ -249,6 +252,41 @@ function showLoginMessage(message) {
   }
 }
 
+function getSessionInitial(sessionId) {
+  const trimmed = String(sessionId || "").trim();
+  if (!trimmed) {
+    return "?";
+  }
+  const parts = trimmed.split(/[\s/_-]+/).filter(Boolean);
+  const initial = parts.length ? parts[0][0] : trimmed[0];
+  return String(initial || "?").toUpperCase();
+}
+
+async function loadMoveSessions() {
+  if (!elements.moveSessionSelect) {
+    return;
+  }
+
+  elements.moveSessionSelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select a session";
+  elements.moveSessionSelect.appendChild(placeholder);
+
+  try {
+    const payload = await apiFetch("/api/sessions");
+    const sessions = payload.items || [];
+    sessions.forEach((sessionId) => {
+      const option = document.createElement("option");
+      option.value = sessionId;
+      option.textContent = sessionId;
+      elements.moveSessionSelect.appendChild(option);
+    });
+  } catch (error) {
+    console.error("Failed to load sessions for move", error);
+  }
+}
+
 async function openSessionManager() {
   await loadSessionManager();
   if (window.bootstrap && window.bootstrap.Modal) {
@@ -268,7 +306,7 @@ async function loadSessionManager() {
   }
 
   try {
-    const payload = await apiFetch("/api/sessions");
+    const payload = await apiFetch("/api/sessions/details");
     const sessions = payload.items || [];
 
     if (elements.sessionManagerCount) {
@@ -280,9 +318,24 @@ async function loadSessionManager() {
       return;
     }
 
-    sessions.forEach((sessionId) => {
+    sessions.forEach((session) => {
+      const sessionId = session.id;
       const card = document.createElement("div");
       card.className = "session-card";
+
+      const cover = document.createElement("div");
+      cover.className = "session-card-cover";
+      if (session.coverUrl) {
+        const img = document.createElement("img");
+        img.src = session.coverUrl;
+        img.alt = `${sessionId} cover`;
+        cover.appendChild(img);
+      } else {
+        const placeholder = document.createElement("span");
+        placeholder.className = "session-card-placeholder";
+        placeholder.textContent = getSessionInitial(sessionId);
+        cover.appendChild(placeholder);
+      }
 
       const title = document.createElement("div");
       title.className = "session-card-title";
@@ -304,6 +357,7 @@ async function loadSessionManager() {
       actions.appendChild(renameBtn);
       actions.appendChild(deleteBtn);
 
+      card.appendChild(cover);
       card.appendChild(title);
       card.appendChild(actions);
       elements.sessionManagerGrid.appendChild(card);
@@ -703,12 +757,45 @@ function openPreview(item) {
   state.previewItem = item;
   elements.previewTitle.textContent = item.name;
   elements.previewFrame.src = withCacheBust(item.url);
+  loadMoveSessions();
   if (window.bootstrap && window.bootstrap.Modal) {
     const modal = new window.bootstrap.Modal(document.getElementById("previewModal"));
     modal.show();
   } else {
     console.warn("Bootstrap Modal unavailable. Opening PDF in new tab.");
     window.open(item.url, "_blank");
+  }
+}
+
+async function handleMovePdf() {
+  if (!state.previewItem) {
+    showToast("Open a PDF preview first.", "warning");
+    return;
+  }
+
+  const targetSession = elements.moveSessionSelect?.value || "";
+  if (!targetSession) {
+    showToast("Please select a session.", "warning");
+    return;
+  }
+
+  try {
+    const payload = await apiFetch("/api/move", {
+      method: "POST",
+      body: JSON.stringify({ file: state.previewItem.relativePath, sessionId: targetSession }),
+    });
+
+    state.previewItem = payload.output || null;
+    showToast("PDF moved.", "success");
+    await refreshSessions();
+
+    const modalElement = document.getElementById("previewModal");
+    const modalInstance = window.bootstrap?.Modal?.getInstance(modalElement);
+    if (modalInstance) {
+      modalInstance.hide();
+    }
+  } catch (error) {
+    showToast(error.message || "Failed to move PDF.", "error");
   }
 }
 
