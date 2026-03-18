@@ -950,11 +950,23 @@ async function handleUpload(event) {
   }
 
   try {
-    showToast("Uploading PDFs...", "info");
+    Swal.fire({
+      title: "Uploading",
+      text: "Uploading PDFs to the server...",
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      allowEnterKey: false,
+      showConfirmButton: false,
+      didOpen: () => {
+        Swal.showLoading();
+      },
+    });
     const payload = await uploadFiles(files);
+    Swal.close();
     showToast(`Uploaded ${payload.items.length} file(s).`, "success");
     await refreshPdfs();
   } catch (error) {
+    Swal.close();
     showToast(error.message, "error");
   } finally {
     event.target.value = "";
@@ -968,8 +980,19 @@ async function handleImagesToPdf(event) {
   }
 
   try {
-    showToast("Uploading images...", "info");
+    Swal.fire({
+      title: "Uploading",
+      text: "Uploading images to the server...",
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      allowEnterKey: false,
+      showConfirmButton: false,
+      didOpen: () => {
+        Swal.showLoading();
+      },
+    });
     const uploadPayload = await uploadFiles(files);
+    Swal.close();
     const images = uploadPayload.items.map((item) => item.relativePath);
 
     const { value: formValues } = await Swal.fire({
@@ -1015,14 +1038,28 @@ async function handleImagesToPdf(event) {
 
     const { outputName, fitMode } = formValues;
 
+    Swal.fire({
+      title: "Processing",
+      text: "Converting images to PDF...",
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      allowEnterKey: false,
+      showConfirmButton: false,
+      didOpen: () => {
+        Swal.showLoading();
+      },
+    });
+
     await apiFetch("/api/images-to-pdf", {
       method: "POST",
       body: JSON.stringify({ sessionId: state.sessionId, images, outputName, fitMode }),
     });
 
+    Swal.close();
     showToast("Images converted to PDF.", "success");
     await refreshPdfs();
   } catch (error) {
+    Swal.close();
     showToast(error.message, "error");
   } finally {
     event.target.value = "";
