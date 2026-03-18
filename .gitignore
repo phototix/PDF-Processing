@@ -1,0 +1,5 @@
+# Ignore uploaded session data
+PDF/sessions/**
+
+# Keep the sessions folder itself
+!PDF/sessions/
