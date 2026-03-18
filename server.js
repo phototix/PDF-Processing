@@ -1,3 +1,4 @@
+const http = require("http");
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
@@ -14,7 +15,17 @@ const USER_FILE = path.join(ROOT, "user.json");
 const CERT_PATH = path.join(ROOT, "localhost.pem");
 const KEY_PATH = path.join(ROOT, "localhost-key.pem");
 
-const PORT = 8080;
+const PORT = Number.parseInt(process.env.PORT, 10) || 8085;
+const USE_HTTPS = resolveUseHttps();
+const COOKIE_SECURE = resolveCookieSecure(USE_HTTPS);
+
+const DEFAULT_GHOSTSCRIPT = process.platform === "win32" ? path.join(ROOT, "gswin64c.exe") : "gs";
+const DEFAULT_MAGICK = process.platform === "win32" ? path.join(ROOT, "magick.exe") : "convert";
+const DEFAULT_IDENTIFY = process.platform === "win32" ? path.join(ROOT, "magick.exe") : "identify";
+const GHOSTSCRIPT_BIN = process.env.GHOSTSCRIPT_BIN || process.env.GS_BIN || DEFAULT_GHOSTSCRIPT;
+const MAGICK_BIN = process.env.IMAGEMAGICK_BIN || process.env.MAGICK_BIN || DEFAULT_MAGICK;
+const MAGICK_IDENTIFY_BIN =
+  process.env.IMAGEMAGICK_IDENTIFY_BIN || process.env.MAGICK_IDENTIFY_BIN || DEFAULT_IDENTIFY;
 
 const ALLOWED_FILE_EXTS = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp", ".js", ".mjs"]);
 
@@ -24,13 +35,21 @@ ensureDir(LOG_DIR);
 const authState = initAuthState();
 loadOrCreateUser();
 
-const server = https.createServer(
-  {
-    cert: fs.readFileSync(CERT_PATH),
-    key: fs.readFileSync(KEY_PATH),
-  },
-  (req, res) => {
-    const parsedUrl = new URL(req.url, `https://${req.headers.host}`);
+const server = USE_HTTPS
+  ? https.createServer(
+      {
+        cert: fs.readFileSync(CERT_PATH),
+        key: fs.readFileSync(KEY_PATH),
+      },
+      requestHandler
+    )
+  : http.createServer(requestHandler);
+
+function requestHandler(req, res) {
+  const parsedUrl = new URL(
+    req.url,
+    `${USE_HTTPS ? "https" : "http"}://${req.headers.host}`
+  );
     const pathname = decodeURIComponent(parsedUrl.pathname || "/");
 
     if (!isPublicRoute(req, pathname) && !isAuthenticated(req)) {
@@ -148,19 +167,54 @@ const server = https.createServer(
       return handleMovePdf(req, res);
     }
 
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: false, error: "Not found" }));
-  }
-);
+  res.writeHead(404, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: false, error: "Not found" }));
+}
 
 server.listen(PORT, () => {
-  console.log(`PDF Processing server running at https://localhost:${PORT}`);
+  const protocol = USE_HTTPS ? "https" : "http";
+  console.log(`PDF Processing server running at ${protocol}://localhost:${PORT}`);
 });
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+}
+
+function resolveUseHttps() {
+  const raw = String(process.env.USE_HTTPS || "").trim().toLowerCase();
+  if (raw === "true") {
+    return true;
+  }
+  if (raw === "false") {
+    return false;
+  }
+  return fs.existsSync(CERT_PATH) && fs.existsSync(KEY_PATH);
+}
+
+function resolveCookieSecure(useHttps) {
+  const raw = String(process.env.COOKIE_SECURE || "").trim().toLowerCase();
+  if (raw === "true") {
+    return true;
+  }
+  if (raw === "false") {
+    return false;
+  }
+  return useHttps;
+}
+
+function isPathLike(command) {
+  return path.isAbsolute(command) || command.includes(path.sep);
+}
+
+function commandAvailable(command) {
+  return !isPathLike(command) || fs.existsSync(command);
+}
+
+function isMagickCli(command) {
+  const base = path.basename(command).toLowerCase();
+  return base === "magick" || base === "magick.exe";
 }
 
 function initAuthState() {
@@ -263,8 +317,10 @@ function buildAuthCookie(token) {
     "SameSite=Strict",
     "Path=/",
     "Max-Age=86400",
-    "Secure",
   ];
+  if (COOKIE_SECURE) {
+    parts.push("Secure");
+  }
   return parts.join("; ");
 }
 
@@ -275,8 +331,10 @@ function clearAuthCookie() {
     "SameSite=Strict",
     "Path=/",
     "Max-Age=0",
-    "Secure",
   ];
+  if (COOKIE_SECURE) {
+    parts.push("Secure");
+  }
   return parts.join("; ");
 }
 
@@ -815,15 +873,15 @@ async function handleMerge(req, res) {
     const sessionDir = ensureSessionDir(sessionId);
     const outputPath = path.join(sessionDir, outputName);
 
-    const gsPath = path.join(ROOT, "gswin64c.exe");
-    if (!fs.existsSync(gsPath)) {
-      return sendJson(res, 500, { ok: false, error: "gswin64c.exe not found" });
+    const gsCommand = GHOSTSCRIPT_BIN;
+    if (!commandAvailable(gsCommand)) {
+      return sendJson(res, 500, { ok: false, error: `Ghostscript not found: ${gsCommand}` });
     }
 
     const args = ["-dBATCH", "-dNOPAUSE", "-q", "-sDEVICE=pdfwrite", `-sOutputFile=${outputPath}`];
     args.push(...inputPaths);
 
-    await runProcess(gsPath, args);
+    await runProcess(gsCommand, args);
 
     const relativePath = path.relative(ROOT, outputPath).replace(/\\/g, "/");
     return sendJson(res, 200, {
@@ -852,14 +910,14 @@ async function handleSplit(req, res) {
     const sessionDir = ensureSessionDir(sessionId);
     const outputPattern = path.join(sessionDir, `${prefix}%03d.pdf`);
 
-    const gsPath = path.join(ROOT, "gswin64c.exe");
-    if (!fs.existsSync(gsPath)) {
-      return sendJson(res, 500, { ok: false, error: "gswin64c.exe not found" });
+    const gsCommand = GHOSTSCRIPT_BIN;
+    if (!commandAvailable(gsCommand)) {
+      return sendJson(res, 500, { ok: false, error: `Ghostscript not found: ${gsCommand}` });
     }
 
     const args = ["-dBATCH", "-dNOPAUSE", "-q", "-sDEVICE=pdfwrite", `-sOutputFile=${outputPattern}`, inputPath];
 
-    await runProcess(gsPath, args);
+    await runProcess(gsCommand, args);
 
     return sendJson(res, 200, { ok: true, message: "Split completed" });
   } catch (error) {
@@ -889,9 +947,13 @@ async function handleImagesToPdf(req, res) {
     const sessionDir = ensureSessionDir(sessionId);
     const outputPath = path.join(sessionDir, outputName);
 
-    const magickPath = path.join(ROOT, "magick.exe");
-    if (!fs.existsSync(magickPath)) {
-      return sendJson(res, 500, { ok: false, error: "magick.exe not found" });
+    const magickCommand = MAGICK_BIN;
+    const identifyCommand = MAGICK_IDENTIFY_BIN;
+    if (!commandAvailable(magickCommand)) {
+      return sendJson(res, 500, { ok: false, error: `ImageMagick not found: ${magickCommand}` });
+    }
+    if (!commandAvailable(identifyCommand)) {
+      return sendJson(res, 500, { ok: false, error: `identify not found: ${identifyCommand}` });
     }
 
     const targetDpi = 150;
@@ -903,7 +965,7 @@ async function handleImagesToPdf(req, res) {
 
     const magickEnv = buildMagickEnv();
     const dimensions = await Promise.all(
-      imagePaths.map((imagePath) => getImageDimensions(magickPath, imagePath, magickEnv))
+      imagePaths.map((imagePath) => getImageDimensions(identifyCommand, imagePath, magickEnv))
     );
 
     const args = ["-units", "PixelsPerInch", "-density", String(targetDpi)];
@@ -931,7 +993,7 @@ async function handleImagesToPdf(req, res) {
     });
 
     args.push(outputPath);
-    await runProcess(magickPath, args, { env: magickEnv });
+    await runProcess(magickCommand, args, { env: magickEnv });
 
     const relativePath = path.relative(ROOT, outputPath).replace(/\\/g, "/");
     return sendJson(res, 200, {
@@ -959,13 +1021,13 @@ async function handlePdfToImages(req, res) {
     const sessionDir = ensureSessionDir(sessionId);
     const outputPattern = path.join(sessionDir, `${prefix}%03d.png`);
 
-    const magickPath = path.join(ROOT, "magick.exe");
-    if (!fs.existsSync(magickPath)) {
-      return sendJson(res, 500, { ok: false, error: "magick.exe not found" });
+    const magickCommand = MAGICK_BIN;
+    if (!commandAvailable(magickCommand)) {
+      return sendJson(res, 500, { ok: false, error: `ImageMagick not found: ${magickCommand}` });
     }
 
     const args = [inputPath, outputPattern];
-    await runProcess(magickPath, args, { env: buildMagickEnv() });
+    await runProcess(magickCommand, args, { env: buildMagickEnv() });
 
     const images = listFilesShallow(sessionDir, (filePath) => {
       const ext = path.extname(filePath).toLowerCase();
@@ -1002,10 +1064,10 @@ async function handleGenerateThumbnail(req, res) {
 
     ensureDir(path.dirname(outputPath));
 
-    const gsPath = path.join(ROOT, "gswin64c.exe");
-    if (!fs.existsSync(gsPath)) {
-      logToFile("thumbnail:ghostscript-missing", { gsPath, file: inputPath });
-      return sendJson(res, 500, { ok: false, error: "gswin64c.exe not found" });
+    const gsCommand = GHOSTSCRIPT_BIN;
+    if (!commandAvailable(gsCommand)) {
+      logToFile("thumbnail:ghostscript-missing", { gsCommand, file: inputPath });
+      return sendJson(res, 500, { ok: false, error: `Ghostscript not found: ${gsCommand}` });
     }
 
     const args = [
@@ -1021,7 +1083,7 @@ async function handleGenerateThumbnail(req, res) {
     ];
 
     try {
-      await runProcess(gsPath, args, { timeoutMs: 120000, name: "thumbnail" });
+      await runProcess(gsCommand, args, { timeoutMs: 120000, name: "thumbnail" });
     } catch (error) {
       logToFile("thumbnail:process-error", {
         file: inputPath,
@@ -1386,9 +1448,9 @@ async function generateThumbnailForPath(inputPath) {
 
   ensureDir(path.dirname(outputPath));
 
-  const gsPath = path.join(ROOT, "gswin64c.exe");
-  if (!fs.existsSync(gsPath)) {
-    throw new Error("gswin64c.exe not found");
+  const gsCommand = GHOSTSCRIPT_BIN;
+  if (!commandAvailable(gsCommand)) {
+    throw new Error(`Ghostscript not found: ${gsCommand}`);
   }
 
   const args = [
@@ -1403,7 +1465,7 @@ async function generateThumbnailForPath(inputPath) {
     inputPath,
   ];
 
-  await runProcess(gsPath, args, { timeoutMs: 120000, name: "thumbnail" });
+  await runProcess(gsCommand, args, { timeoutMs: 120000, name: "thumbnail" });
   assertNonEmptyFile(outputPath, "thumbnail");
   return outputPath;
 }
@@ -1423,6 +1485,7 @@ function runProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 300000;
     const name = options.name || path.basename(command);
+    let settled = false;
     const child = spawn(command, args, {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
@@ -1434,6 +1497,10 @@ function runProcess(command, args, options = {}) {
 
     const timer = timeoutMs
       ? setTimeout(() => {
+          if (settled) {
+            return;
+          }
+          settled = true;
           child.kill("SIGKILL");
           reject(new Error(`${name} timed out after ${timeoutMs}ms`));
         }, timeoutMs)
@@ -1447,7 +1514,22 @@ function runProcess(command, args, options = {}) {
       stdout += chunk.toString();
     });
 
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+      reject(error);
+    });
+
     child.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       if (timer) {
         clearTimeout(timer);
       }
@@ -1461,9 +1543,10 @@ function runProcess(command, args, options = {}) {
   });
 }
 
-async function getImageDimensions(magickPath, imagePath, env) {
-  const args = ["identify", "-auto-orient", "-format", "%w %h", imagePath];
-  const { stdout } = await runProcess(magickPath, args, { timeoutMs: 60000, name: "identify", env });
+async function getImageDimensions(identifyCommand, imagePath, env) {
+  const prefix = isMagickCli(identifyCommand) ? ["identify"] : [];
+  const args = [...prefix, "-auto-orient", "-format", "%w %h", imagePath];
+  const { stdout } = await runProcess(identifyCommand, args, { timeoutMs: 60000, name: "identify", env });
   const parts = String(stdout || "").trim().split(/\s+/).map((value) => Number(value));
   const width = parts[0];
   const height = parts[1];
@@ -1475,11 +1558,21 @@ async function getImageDimensions(magickPath, imagePath, env) {
 
 function buildMagickEnv() {
   const currentPath = process.env.PATH || process.env.Path || "";
-  const separator = currentPath.includes(";") ? ";" : path.delimiter;
-  const nextPath = currentPath ? `${ROOT}${separator}${currentPath}` : ROOT;
-  return {
+  const prependRoot =
+    process.env.MAGICK_PATH_PREPEND === "true" || process.platform === "win32";
+  const nextPath = prependRoot
+    ? currentPath
+      ? `${ROOT}${path.delimiter}${currentPath}`
+      : ROOT
+    : currentPath;
+  const env = {
     ...process.env,
     PATH: nextPath,
-    MAGICK_GHOSTSCRIPT_PATH: ROOT,
   };
+  const gsDir =
+    process.env.MAGICK_GHOSTSCRIPT_PATH || (path.isAbsolute(GHOSTSCRIPT_BIN) ? path.dirname(GHOSTSCRIPT_BIN) : "");
+  if (gsDir) {
+    env.MAGICK_GHOSTSCRIPT_PATH = gsDir;
+  }
+  return env;
 }

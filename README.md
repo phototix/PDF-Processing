@@ -34,9 +34,9 @@ Designed for users who **don’t want to upload sensitive documents to unknown P
 ### Prerequisites
 
 - **Node.js** (LTS recommended)
-- **Ghostscript** (`gswin64c.exe`) placed in the project root
-- **ImageMagick** (`magick.exe`) placed in the project root
-- **HTTPS certificates** in the project root:
+- **Ghostscript**
+- **ImageMagick**
+- **HTTPS certificates** in the project root (only if you run HTTPS directly):
   - `localhost.pem`
   - `localhost-key.pem`
 
@@ -55,6 +55,29 @@ node server.js
 ```
 
 Open: **https://localhost:8080**
+
+## 🖥️ Server (Linux + reverse proxy)
+
+Install system packages:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ghostscript imagemagick
+```
+
+Run the app over HTTP behind your reverse proxy (Nginx/Apache/Caddy):
+
+```bash
+USE_HTTPS=false COOKIE_SECURE=true node server.js
+```
+
+Notes:
+
+- **Ghostscript binary:** defaults to `gs`. Override with `GHOSTSCRIPT_BIN` if needed.
+- **ImageMagick binary:** defaults to `convert` + `identify`. If you prefer ImageMagick 7, set:
+  - `IMAGEMAGICK_BIN=magick`
+  - `IMAGEMAGICK_IDENTIFY_BIN=magick`
+- **Cookies:** when TLS is terminated at the proxy, keep `COOKIE_SECURE=true` so the browser only sends auth cookies over HTTPS.
 
 ## 🗂️ Project Structure
 

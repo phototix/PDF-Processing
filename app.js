@@ -494,7 +494,24 @@ async function apiFetch(path, options) {
     ...options,
   });
 
-  const payload = await response.json();
+  const rawText = await response.text();
+  let payload;
+
+  try {
+    payload = JSON.parse(rawText);
+  } catch (error) {
+    const trimmed = String(rawText || "").trim();
+    const fallbackMessage = `Request failed (${response.status})`;
+    const message = trimmed && !trimmed.startsWith("<") ? trimmed : fallbackMessage;
+    payload = { ok: response.ok, error: message };
+  }
+
+  if (!response.ok && payload.ok !== false) {
+    payload.ok = false;
+    if (!payload.error) {
+      payload.error = `Request failed (${response.status})`;
+    }
+  }
   if (response.status === 401) {
     showLoginOverlay("Session expired. Please log in again.");
     throw new Error(payload.error || "Login required");
