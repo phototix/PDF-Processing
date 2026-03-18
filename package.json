@@ -1,0 +1,10 @@
+{
+  "name": "pdf-processing",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PDF Processing Studio server",
+  "main": "server.js",
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
+  }
+}
