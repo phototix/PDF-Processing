@@ -5,13 +5,21 @@ const state = {
   pdfs: [],
   selected: new Set(),
   previewItem: null,
+  highlightPath: null,
 };
+
+let appInitialized = false;
+let loginFormInitialized = false;
+let authPromiseResolver = null;
 
 const elements = {
   sessionId: document.getElementById("sessionId"),
   sessionFilter: document.getElementById("sessionFilter"),
+  refreshPathsBtn: document.getElementById("refreshPathsBtn"),
   uploadInput: document.getElementById("uploadInput"),
   uploadBtn: document.getElementById("uploadBtn"),
+  newSessionAction: document.getElementById("newSessionAction"),
+  logoutAction: document.getElementById("logoutAction"),
   refreshBtn: document.getElementById("refreshBtn"),
   generateThumbsBtn: document.getElementById("generateThumbsBtn"),
   mergeBtn: document.getElementById("mergeBtn"),
@@ -28,6 +36,13 @@ const elements = {
   arrangeGrid: document.getElementById("arrangeGrid"),
   arrangeConfirm: document.getElementById("arrangeConfirm"),
   imagesInput: document.getElementById("imagesInput"),
+  imagesGrid: document.getElementById("imagesGrid"),
+  imagesModalCount: document.getElementById("imagesModalCount"),
+  loginOverlay: document.getElementById("loginOverlay"),
+  loginForm: document.getElementById("loginForm"),
+  loginUsername: document.getElementById("loginUsername"),
+  loginPassword: document.getElementById("loginPassword"),
+  loginMessage: document.getElementById("loginMessage"),
 };
 
 startApp();
@@ -42,6 +57,8 @@ async function startApp() {
   }
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfJsSources.workerSrc;
+  setupLoginForm();
+  await ensureAuth();
   init();
 }
 
@@ -122,6 +139,8 @@ function init() {
 
   elements.uploadBtn.addEventListener("click", () => elements.uploadInput.click());
   elements.uploadInput.addEventListener("change", handleUpload);
+  elements.newSessionAction.addEventListener("click", startNewSession);
+  elements.logoutAction.addEventListener("click", handleLogout);
 
   elements.refreshBtn.addEventListener("click", refreshPdfs);
   elements.generateThumbsBtn.addEventListener("click", generateThumbnails);
@@ -131,12 +150,111 @@ function init() {
   elements.imagesBtn.addEventListener("click", () => elements.imagesInput.click());
   elements.imagesInput.addEventListener("change", handleImagesToPdf);
   elements.sessionFilter.addEventListener("change", refreshPdfs);
+  elements.refreshPathsBtn.addEventListener("click", refreshSessions);
   elements.previewArrange.addEventListener("click", openArrangeModal);
   elements.previewRotateLeft.addEventListener("click", () => rotatePreview("ccw"));
   elements.previewRotateRight.addEventListener("click", () => rotatePreview("cw"));
   elements.arrangeConfirm.addEventListener("click", submitArrange);
 
   refreshSessions();
+  appInitialized = true;
+}
+
+function setupLoginForm() {
+  if (loginFormInitialized || !elements.loginForm) {
+    return;
+  }
+
+  elements.loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await handleLoginSubmit();
+  });
+  loginFormInitialized = true;
+}
+
+async function ensureAuth() {
+  try {
+    const status = await apiFetch("/api/auth/status");
+    if (status.authenticated) {
+      hideLoginOverlay();
+      return;
+    }
+  } catch (error) {
+    console.error("Auth status failed", error);
+  }
+
+  showLoginOverlay();
+  await new Promise((resolve) => {
+    authPromiseResolver = resolve;
+  });
+}
+
+async function handleLoginSubmit() {
+  const username = elements.loginUsername?.value?.trim() || "";
+  const password = elements.loginPassword?.value || "";
+
+  if (!username || !password) {
+    showLoginMessage("Please enter your username and password.");
+    return;
+  }
+
+  try {
+    showLoginMessage("");
+    await apiFetch("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+
+    hideLoginOverlay();
+    if (typeof authPromiseResolver === "function") {
+      authPromiseResolver(true);
+      authPromiseResolver = null;
+    }
+    if (appInitialized) {
+      await refreshSessions();
+    }
+  } catch (error) {
+    showLoginMessage(error.message || "Login failed.");
+  }
+}
+
+function showLoginOverlay(message) {
+  if (!elements.loginOverlay) {
+    return;
+  }
+  if (message) {
+    showLoginMessage(message);
+  }
+  elements.loginOverlay.classList.remove("d-none");
+}
+
+function hideLoginOverlay() {
+  if (!elements.loginOverlay) {
+    return;
+  }
+  elements.loginOverlay.classList.add("d-none");
+  showLoginMessage("");
+  if (elements.loginPassword) {
+    elements.loginPassword.value = "";
+  }
+}
+
+function showLoginMessage(message) {
+  if (elements.loginMessage) {
+    elements.loginMessage.textContent = message || "";
+  }
+}
+
+async function handleLogout() {
+  try {
+    await apiFetch("/api/auth/logout", { method: "POST" });
+  } catch (error) {
+    console.warn("Logout request failed", error);
+  }
+
+  showLoginOverlay("You have been logged out.");
+  state.selected.clear();
+  renderSelected();
 }
 
 function getSessionId() {
@@ -150,6 +268,39 @@ function getSessionId() {
   return newId;
 }
 
+function setSessionId(sessionId) {
+  state.sessionId = sessionId;
+  localStorage.setItem("pdfSessionId", sessionId);
+  if (elements.sessionId) {
+    elements.sessionId.textContent = sessionId;
+  }
+}
+
+function createSessionId() {
+  return (crypto.randomUUID && crypto.randomUUID()) || `session_${Date.now()}`;
+}
+
+async function startNewSession() {
+  const newId = createSessionId();
+  setSessionId(newId);
+  state.selected.clear();
+  renderSelected();
+
+  try {
+    await refreshSessions();
+    if (elements.sessionFilter) {
+      const option = Array.from(elements.sessionFilter.options).find((opt) => opt.value === newId);
+      if (option) {
+        elements.sessionFilter.value = newId;
+      }
+    }
+    showToast("New session created.", "success");
+  } catch (error) {
+    console.error("Failed to refresh after new session", error);
+    showToast("New session created.", "success");
+  }
+}
+
 async function apiFetch(path, options) {
   const response = await fetch(path, {
     headers: {
@@ -159,6 +310,11 @@ async function apiFetch(path, options) {
   });
 
   const payload = await response.json();
+  if (response.status === 401) {
+    showLoginOverlay("Session expired. Please log in again.");
+    throw new Error(payload.error || "Login required");
+  }
+
   if (!payload.ok) {
     throw new Error(payload.error || "Request failed");
   }
@@ -252,6 +408,8 @@ function renderGrid() {
     return;
   }
 
+  let highlightCard = null;
+
   state.pdfs.forEach((item) => {
     const col = document.createElement("div");
     col.className = "col-sm-6 col-md-4 col-xl-3";
@@ -260,6 +418,10 @@ function renderGrid() {
     card.className = "card pdf-card h-100 selectable";
     if (state.selected.has(item.relativePath)) {
       card.classList.add("selected");
+    }
+    if (state.highlightPath && item.relativePath === state.highlightPath) {
+      card.classList.add("recent-output");
+      highlightCard = card;
     }
 
     let thumbElement = null;
@@ -352,6 +514,14 @@ function renderGrid() {
       renderThumbnail(item.url, thumbElement);
     }
   });
+
+  if (highlightCard) {
+    highlightCard.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => {
+      highlightCard?.classList.remove("recent-output");
+    }, 2500);
+    state.highlightPath = null;
+  }
 }
 
 function renderSelected() {
@@ -423,6 +593,17 @@ async function openArrangeModal() {
   }
 
   try {
+    Swal.fire({
+      title: "Preparing pages",
+      text: "Rendering page thumbnails...",
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      showConfirmButton: false,
+      didOpen: () => {
+        Swal.showLoading();
+      },
+    });
+
     elements.arrangeGrid.innerHTML = "";
     const pdf = await pdfjsLib.getDocument(state.previewItem.url).promise;
     const pageCount = pdf.numPages;
@@ -464,6 +645,7 @@ async function openArrangeModal() {
     const modalElement = document.getElementById("arrangeModal");
     const previewModalElement = document.getElementById("previewModal");
     const modal = new window.bootstrap.Modal(modalElement);
+    Swal.close();
     modal.show();
 
     previewModalElement.classList.add("preview-modal-dim");
@@ -475,6 +657,7 @@ async function openArrangeModal() {
       { once: true }
     );
   } catch (error) {
+    Swal.close();
     console.error("Failed to load pages for arrange", error);
     showToast("Failed to load pages for arranging.", "error");
   }
@@ -571,22 +754,52 @@ async function handleImagesToPdf(event) {
     const uploadPayload = await uploadFiles(files);
     const images = uploadPayload.items.map((item) => item.relativePath);
 
-    const { value: outputName } = await Swal.fire({
+    const { value: formValues } = await Swal.fire({
       title: "Create PDF from images",
-      input: "text",
-      inputLabel: "Output PDF name",
-      inputValue: "images.pdf",
+      html: `
+        <div class="text-start">
+          <label for="imagesToPdfName" class="form-label">Output PDF name</label>
+          <input id="imagesToPdfName" class="form-control" value="images.pdf" />
+          <div class="mt-3">
+            <div class="form-label mb-2">Page fit</div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="imagesToPdfFit" id="imagesToPdfFill" value="fill" checked />
+              <label class="form-check-label" for="imagesToPdfFill">Fill page (crop edges)</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="imagesToPdfFit" id="imagesToPdfFit" value="fit" />
+              <label class="form-check-label" for="imagesToPdfFit">Fit page (no crop)</label>
+            </div>
+          </div>
+        </div>
+      `,
+      focusConfirm: false,
       showCancelButton: true,
+      preConfirm: () => {
+        const nameInput = document.getElementById("imagesToPdfName");
+        const selected = document.querySelector("input[name='imagesToPdfFit']:checked");
+        const outputName = nameInput ? nameInput.value.trim() : "";
+        const fitMode = selected ? selected.value : "fill";
+
+        if (!outputName) {
+          Swal.showValidationMessage("Please enter a PDF name.");
+          return null;
+        }
+
+        return { outputName, fitMode };
+      },
     });
 
-    if (!outputName) {
+    if (!formValues) {
       showToast("Image conversion cancelled.", "info");
       return;
     }
 
+    const { outputName, fitMode } = formValues;
+
     await apiFetch("/api/images-to-pdf", {
       method: "POST",
-      body: JSON.stringify({ sessionId: state.sessionId, images, outputName }),
+      body: JSON.stringify({ sessionId: state.sessionId, images, outputName, fitMode }),
     });
 
     showToast("Images converted to PDF.", "success");
@@ -641,13 +854,28 @@ async function mergeSelected() {
   }
 
   try {
-    await apiFetch("/api/merge", {
+    Swal.fire({
+      title: "Processing",
+      text: "Merging selected PDFs...",
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      allowEnterKey: false,
+      showConfirmButton: false,
+      didOpen: () => {
+        Swal.showLoading();
+      },
+    });
+
+    const payload = await apiFetch("/api/merge", {
       method: "POST",
       body: JSON.stringify({ sessionId: state.sessionId, files: selected, outputName }),
     });
+    Swal.close();
+    state.highlightPath = payload?.output?.relativePath || null;
     showToast("Merge completed.", "success");
     await refreshPdfs();
   } catch (error) {
+    Swal.close();
     showToast(error.message, "error");
   }
 }
@@ -672,13 +900,27 @@ async function splitSelected() {
   }
 
   try {
+    Swal.fire({
+      title: "Processing",
+      text: "Splitting PDF pages...",
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      allowEnterKey: false,
+      showConfirmButton: false,
+      didOpen: () => {
+        Swal.showLoading();
+      },
+    });
+
     await apiFetch("/api/split", {
       method: "POST",
       body: JSON.stringify({ sessionId: state.sessionId, file: selected[0], prefix }),
     });
+    Swal.close();
     showToast("Split completed.", "success");
     await refreshPdfs();
   } catch (error) {
+    Swal.close();
     showToast(error.message, "error");
   }
 }
@@ -703,7 +945,19 @@ async function renderPdfToImages() {
   }
 
   try {
-    await apiFetch("/api/pdf-to-images", {
+    Swal.fire({
+      title: "Processing",
+      text: "Converting PDF pages to images...",
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      allowEnterKey: false,
+      showConfirmButton: false,
+      didOpen: () => {
+        Swal.showLoading();
+      },
+    });
+
+    const payload = await apiFetch("/api/pdf-to-images", {
       method: "POST",
       body: JSON.stringify({
         sessionId: state.sessionId,
@@ -711,11 +965,66 @@ async function renderPdfToImages() {
         prefix,
       }),
     });
-    showToast("PDF rendered to images.", "success");
+
     await refreshPdfs();
+    if (payload.items && payload.items.length) {
+      Swal.close();
+      showToast("PDF rendered to images.", "success");
+      openImagesModal(payload.items);
+    } else {
+      Swal.close();
+      showToast("No images were generated.", "warning");
+    }
   } catch (error) {
     console.error("PDF to images failed", { file: selected[0], error: error?.message || error });
+    Swal.close();
     showToast(error.message || "Failed to render PDF to images.", "error");
+  }
+}
+
+function openImagesModal(items) {
+  if (!elements.imagesGrid) {
+    return;
+  }
+
+  elements.imagesGrid.innerHTML = "";
+  const countLabel = elements.imagesModalCount;
+  if (countLabel) {
+    countLabel.textContent = `${items.length} image${items.length === 1 ? "" : "s"}`;
+  }
+
+  items.forEach((item) => {
+    const card = document.createElement("div");
+    card.className = "images-card";
+
+    const thumb = document.createElement("img");
+    thumb.className = "images-thumb";
+    thumb.src = item.url;
+    thumb.alt = item.name;
+
+    const name = document.createElement("div");
+    name.className = "images-name";
+    name.textContent = item.name;
+
+    const actions = document.createElement("div");
+    actions.className = "images-actions";
+
+    const download = document.createElement("a");
+    download.className = "btn btn-sm btn-outline-primary";
+    download.href = item.url;
+    download.setAttribute("download", item.name);
+    download.innerHTML = "<i class=\"fa-solid fa-download\"></i> Download";
+
+    actions.appendChild(download);
+    card.appendChild(thumb);
+    card.appendChild(name);
+    card.appendChild(actions);
+    elements.imagesGrid.appendChild(card);
+  });
+
+  if (window.bootstrap && window.bootstrap.Modal) {
+    const modal = new window.bootstrap.Modal(document.getElementById("imagesModal"));
+    modal.show();
   }
 }
 

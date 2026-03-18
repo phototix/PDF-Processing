@@ -17,13 +17,53 @@
 			crossorigin="anonymous"
 			referrerpolicy="no-referrer"
 		/>
-		<link rel="stylesheet" href="styles.css?version=0.0.15" />
+		<link rel="stylesheet" href="styles.css?version=0.0.33" />
 	</head>
 	<body>
+		<div id="loginOverlay" class="login-overlay d-none">
+			<div class="login-card">
+				<h4 class="mb-2">Sign in to continue</h4>
+				<p class="text-muted small mb-3">
+					Use the credentials in <strong>user.json</strong>. If it was just created, check the server console.
+				</p>
+				<form id="loginForm" class="d-grid gap-2">
+					<label class="form-label" for="loginUsername">Username</label>
+					<input class="form-control" id="loginUsername" type="text" autocomplete="username" required />
+					<label class="form-label mt-2" for="loginPassword">Password</label>
+					<input class="form-control" id="loginPassword" type="password" autocomplete="current-password" required />
+					<button class="btn btn-primary mt-3" type="submit" id="loginBtn">Login</button>
+					<div id="loginMessage" class="small text-danger"></div>
+				</form>
+			</div>
+		</div>
+
 		<nav class="navbar navbar-expand-lg">
 			<div class="container-fluid px-4">
 				<span class="navbar-brand">PDF Processing Studio</span>
-				<span class="session-badge">Session: <span id="sessionId"></span></span>
+				<div class="dropdown session-dropdown">
+					<button
+						class="btn session-badge dropdown-toggle"
+						type="button"
+						id="sessionMenuButton"
+						data-bs-toggle="dropdown"
+						aria-expanded="false"
+					>
+						Session: <span id="sessionId"></span>
+					</button>
+					<ul class="dropdown-menu dropdown-menu-end" aria-labelledby="sessionMenuButton">
+						<li>
+							<button class="dropdown-item" type="button" id="newSessionAction">
+								<i class="fa-solid fa-folder-plus me-2"></i>New Session
+							</button>
+						</li>
+						<li><hr class="dropdown-divider" /></li>
+						<li>
+							<button class="dropdown-item" type="button" id="logoutAction">
+								<i class="fa-solid fa-right-from-bracket me-2"></i>Logout
+							</button>
+						</li>
+					</ul>
+				</div>
 			</div>
 		</nav>
 
@@ -39,7 +79,7 @@
 								Upload PDFs
 							</button>
 							<button class="btn btn-outline-secondary action-btn" id="refreshBtn">
-								<i class="fa-solid fa-rotate"></i>
+								<img src="/files/assets/icons/refresh.png" alt="Refresh" width="16" height="16" />
 								Refresh Grid
 							</button>
 							<button class="btn btn-outline-info action-btn" id="generateThumbsBtn">
@@ -85,6 +125,9 @@
 							<select id="sessionFilter" class="form-select form-select-sm">
 								<option value="all">All</option>
 							</select>
+							<button class="btn btn-outline-secondary btn-sm" id="refreshPathsBtn" type="button" title="Refresh paths">
+								<img src="/files/assets/icons/refresh.png" alt="Refresh paths" width="16" height="16" />
+							</button>
 						</div>
 					</div>
 
@@ -142,9 +185,30 @@
 			</div>
 		</div>
 
+		<div class="modal fade" id="imagesModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+			<div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+				<div class="modal-content">
+					<div class="modal-header">
+						<div>
+							<h5 class="modal-title">Extracted Images</h5>
+							<div class="small text-muted" id="imagesModalCount">0 images</div>
+						</div>
+						<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+					</div>
+					<div class="modal-body">
+						<div class="text-muted mb-3">Click download to save individual images.</div>
+						<div id="imagesGrid" class="images-grid"></div>
+					</div>
+					<div class="modal-footer">
+						<button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
 		<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 		<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 		<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.js"></script>
-		<script src="app.js?version=0.0.15"></script>
+		<script src="app.js?version=0.0.33"></script>
 	</body>
 </html>

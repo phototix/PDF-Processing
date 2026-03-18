@@ -1,6 +1,7 @@
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { spawn } = require("child_process");
 const { PDFDocument, degrees } = require("pdf-lib");
 
@@ -8,6 +9,7 @@ const ROOT = __dirname;
 const PDF_ROOT = path.join(ROOT, "PDF");
 const SESSIONS_ROOT = path.join(PDF_ROOT, "sessions");
 const LOG_DIR = path.join(ROOT, "logs");
+const USER_FILE = path.join(ROOT, "user.json");
 
 const CERT_PATH = path.join(ROOT, "localhost.pem");
 const KEY_PATH = path.join(ROOT, "localhost-key.pem");
@@ -19,6 +21,8 @@ const ALLOWED_FILE_EXTS = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp", ".j
 ensureDir(PDF_ROOT);
 ensureDir(SESSIONS_ROOT);
 ensureDir(LOG_DIR);
+const authState = initAuthState();
+loadOrCreateUser();
 
 const server = https.createServer(
   {
@@ -28,6 +32,10 @@ const server = https.createServer(
   (req, res) => {
     const parsedUrl = new URL(req.url, `https://${req.headers.host}`);
     const pathname = decodeURIComponent(parsedUrl.pathname || "/");
+
+    if (!isPublicRoute(req, pathname) && !isAuthenticated(req)) {
+      return sendJson(res, 401, { ok: false, error: "Login required" });
+    }
 
     if (req.method === "GET" && (pathname === "/" || pathname === "/index.html")) {
       return sendFile(res, path.join(ROOT, "index.html"), "text/html; charset=utf-8");
@@ -45,6 +53,19 @@ const server = https.createServer(
 
     if (req.method === "GET" && pathname === "/app.js") {
       return sendFile(res, path.join(ROOT, "app.js"), "application/javascript; charset=utf-8");
+    }
+
+    if (req.method === "GET" && pathname === "/api/auth/status") {
+      const user = getAuthenticatedUser(req);
+      return sendJson(res, 200, { ok: true, authenticated: Boolean(user), user: user?.username || null });
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/login") {
+      return handleLogin(req, res);
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/logout") {
+      return handleLogout(req, res);
     }
 
     if (req.method === "GET" && pathname.startsWith("/files/")) {
@@ -122,6 +143,163 @@ server.listen(PORT, () => {
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+function initAuthState() {
+  return {
+    user: null,
+    tokens: new Map(),
+  };
+}
+
+function loadOrCreateUser() {
+  if (fs.existsSync(USER_FILE)) {
+    try {
+      const raw = fs.readFileSync(USER_FILE, "utf8");
+      const user = JSON.parse(raw || "{}");
+      if (user && user.username && user.password) {
+        authState.user = {
+          username: String(user.username),
+          password: String(user.password),
+        };
+        return;
+      }
+    } catch (error) {
+      console.error("Failed to read user.json", error);
+    }
+  }
+
+  const username = "admin";
+  const password = generatePassword();
+  const payload = {
+    username,
+    password,
+    createdAt: new Date().toISOString(),
+  };
+
+  fs.writeFileSync(USER_FILE, JSON.stringify(payload, null, 2), "utf8");
+  authState.user = { username, password };
+  console.log("\n=== PDF Processing Studio Login ===");
+  console.log(`Username: ${username}`);
+  console.log(`Password: ${password}`);
+  console.log("Credentials saved to user.json\n");
+}
+
+function generatePassword() {
+  return crypto.randomBytes(8).toString("base64url");
+}
+
+function parseCookies(cookieHeader) {
+  const cookies = {};
+  const raw = String(cookieHeader || "");
+  raw.split(";").forEach((part) => {
+    const [key, ...rest] = part.trim().split("=");
+    if (!key) {
+      return;
+    }
+    cookies[key] = rest.join("=");
+  });
+  return cookies;
+}
+
+function getAuthToken(req) {
+  const cookies = parseCookies(req.headers.cookie || "");
+  return cookies.authToken || "";
+}
+
+function getAuthenticatedUser(req) {
+  const token = getAuthToken(req);
+  if (!token) {
+    return null;
+  }
+  return authState.tokens.get(token) || null;
+}
+
+function isAuthenticated(req) {
+  return Boolean(getAuthenticatedUser(req));
+}
+
+function isPublicRoute(req, pathname) {
+  if (req.method === "GET" && (pathname === "/" || pathname === "/index.html")) {
+    return true;
+  }
+  if (req.method === "GET" && ["/styles.css", "/app.js", "/favicon.ico"].includes(pathname)) {
+    return true;
+  }
+  if (req.method === "GET" && pathname === "/api/auth/status") {
+    return true;
+  }
+  if (req.method === "POST" && pathname === "/api/auth/login") {
+    return true;
+  }
+  if (req.method === "GET" && pathname.startsWith("/files/assets/")) {
+    return true;
+  }
+  return false;
+}
+
+function buildAuthCookie(token) {
+  const parts = [
+    `authToken=${token}`,
+    "HttpOnly",
+    "SameSite=Strict",
+    "Path=/",
+    "Max-Age=86400",
+    "Secure",
+  ];
+  return parts.join("; ");
+}
+
+function clearAuthCookie() {
+  const parts = [
+    "authToken=",
+    "HttpOnly",
+    "SameSite=Strict",
+    "Path=/",
+    "Max-Age=0",
+    "Secure",
+  ];
+  return parts.join("; ");
+}
+
+async function handleLogin(req, res) {
+  try {
+    const body = await readBody(req);
+    const payload = JSON.parse(body || "{}");
+    const username = String(payload.username || "").trim();
+    const password = String(payload.password || "");
+
+    if (!username || !password || !authState.user) {
+      return sendJson(res, 401, { ok: false, error: "Invalid credentials" });
+    }
+
+    if (username !== authState.user.username || password !== authState.user.password) {
+      return sendJson(res, 401, { ok: false, error: "Invalid credentials" });
+    }
+
+    const token = crypto.randomBytes(24).toString("base64url");
+    authState.tokens.set(token, { username, createdAt: new Date().toISOString() });
+    return sendJson(
+      res,
+      200,
+      { ok: true, user: { username } },
+      { "Set-Cookie": buildAuthCookie(token) }
+    );
+  } catch (error) {
+    return sendJson(res, 500, { ok: false, error: error.message || "Login failed" });
+  }
+}
+
+async function handleLogout(req, res) {
+  try {
+    const token = getAuthToken(req);
+    if (token) {
+      authState.tokens.delete(token);
+    }
+    return sendJson(res, 200, { ok: true }, { "Set-Cookie": clearAuthCookie() });
+  } catch (error) {
+    return sendJson(res, 500, { ok: false, error: error.message || "Logout failed" });
   }
 }
 
@@ -409,8 +587,8 @@ function readBody(req) {
   });
 }
 
-function sendJson(res, status, payload) {
-  res.writeHead(status, { "Content-Type": "application/json" });
+function sendJson(res, status, payload, headers = {}) {
+  res.writeHead(status, { "Content-Type": "application/json", ...headers });
   res.end(JSON.stringify(payload));
 }
 
@@ -543,6 +721,8 @@ async function handleImagesToPdf(req, res) {
     }
 
     const outputName = safeOutputName(payload.outputName, "images");
+    const fitModeRaw = String(payload.fitMode || payload.mode || "fill").trim().toLowerCase();
+    const fitMode = fitModeRaw === "fit" ? "fit" : "fill";
     const sessionDir = ensureSessionDir(sessionId);
     const outputPath = path.join(sessionDir, outputName);
 
@@ -551,23 +731,44 @@ async function handleImagesToPdf(req, res) {
       return sendJson(res, 500, { ok: false, error: "magick.exe not found" });
     }
 
-    const a4Width = 2480;
-    const a4Height = 3508;
-    const args = [
-      "-units",
-      "PixelsPerInch",
-      "-density",
-      "300",
-      ...imagePaths,
-      "-resize",
-      `${a4Width}x${a4Height}^`,
-      "-gravity",
-      "center",
-      "-extent",
-      `${a4Width}x${a4Height}`,
-      outputPath,
-    ];
-    await runProcess(magickPath, args);
+    const targetDpi = 150;
+    const a4PortraitWidth = Math.round(8.27 * targetDpi);
+    const a4PortraitHeight = Math.round(11.69 * targetDpi);
+    const a4LandscapeWidth = a4PortraitHeight;
+    const a4LandscapeHeight = a4PortraitWidth;
+    const resizeMode = fitMode === "fit" ? ">" : "^>";
+
+    const magickEnv = buildMagickEnv();
+    const dimensions = await Promise.all(
+      imagePaths.map((imagePath) => getImageDimensions(magickPath, imagePath, magickEnv))
+    );
+
+    const args = ["-units", "PixelsPerInch", "-density", String(targetDpi)];
+
+    imagePaths.forEach((imagePath, index) => {
+      const { width, height } = dimensions[index];
+      const isLandscape = width > height;
+      const pageWidth = isLandscape ? a4LandscapeWidth : a4PortraitWidth;
+      const pageHeight = isLandscape ? a4LandscapeHeight : a4PortraitHeight;
+
+      args.push(
+        "(",
+        imagePath,
+        "-auto-orient",
+        "-resize",
+        `${pageWidth}x${pageHeight}${resizeMode}`,
+        "-background",
+        "white",
+        "-gravity",
+        "center",
+        "-extent",
+        `${pageWidth}x${pageHeight}`,
+        ")"
+      );
+    });
+
+    args.push(outputPath);
+    await runProcess(magickPath, args, { env: magickEnv });
 
     const relativePath = path.relative(ROOT, outputPath).replace(/\\/g, "/");
     return sendJson(res, 200, {
@@ -601,7 +802,7 @@ async function handlePdfToImages(req, res) {
     }
 
     const args = [inputPath, outputPattern];
-    await runProcess(magickPath, args);
+    await runProcess(magickPath, args, { env: buildMagickEnv() });
 
     const images = listFilesShallow(sessionDir, (filePath) => {
       const ext = path.extname(filePath).toLowerCase();
@@ -1016,7 +1217,11 @@ function runProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 300000;
     const name = options.name || path.basename(command);
-    const child = spawn(command, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: options.env || process.env,
+    });
 
     let stderr = "";
     let stdout = "";
@@ -1041,11 +1246,34 @@ function runProcess(command, args, options = {}) {
         clearTimeout(timer);
       }
       if (code === 0) {
-        resolve();
+        resolve({ stdout, stderr });
       } else {
         const details = stderr || stdout || `Process failed with code ${code}`;
         reject(new Error(details));
       }
     });
   });
+}
+
+async function getImageDimensions(magickPath, imagePath, env) {
+  const args = ["identify", "-auto-orient", "-format", "%w %h", imagePath];
+  const { stdout } = await runProcess(magickPath, args, { timeoutMs: 60000, name: "identify", env });
+  const parts = String(stdout || "").trim().split(/\s+/).map((value) => Number(value));
+  const width = parts[0];
+  const height = parts[1];
+  if (!Number.isFinite(width) || !Number.isFinite(height)) {
+    throw new Error(`Unable to read image dimensions for ${path.basename(imagePath)}`);
+  }
+  return { width, height };
+}
+
+function buildMagickEnv() {
+  const currentPath = process.env.PATH || process.env.Path || "";
+  const separator = currentPath.includes(";") ? ";" : path.delimiter;
+  const nextPath = currentPath ? `${ROOT}${separator}${currentPath}` : ROOT;
+  return {
+    ...process.env,
+    PATH: nextPath,
+    MAGICK_GHOSTSCRIPT_PATH: ROOT,
+  };
 }

@@ -2,6 +2,14 @@
 
 A lightweight, self-hosted PDF processing web app that runs locally and provides an easy grid-based UI for common PDF tasks: merge, split, rotate, reorder pages, generate thumbnails, and convert between PDFs and images. Built with vanilla HTML/CSS/JS, a small Node.js HTTPS server, and native tools (Ghostscript + ImageMagick).
 
+Designed for users who **don’t want to upload sensitive documents to unknown PDF editor websites**, but still want **free, convenient PDF tools** on their own machine.
+
+## 🔒 Why local-first
+
+- **Your documents stay on your computer** — no cloud upload required
+- **Ideal for sensitive or private files** (invoices, contracts, IDs)
+- **Free tools without giving up privacy**
+
 ## ✨ Features
 
 - **Grid view with thumbnails** for PDF browsing
