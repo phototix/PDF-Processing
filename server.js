@@ -85,6 +85,14 @@ const server = https.createServer(
       return sendJson(res, 200, payload);
     }
 
+    if (req.method === "POST" && pathname === "/api/sessions/rename") {
+      return handleRenameSession(req, res);
+    }
+
+    if (req.method === "POST" && pathname === "/api/sessions/delete") {
+      return handleDeleteSession(req, res);
+    }
+
     if (req.method === "GET" && pathname === "/api/images") {
       const sessionId = sanitizeSessionId(parsedUrl.searchParams.get("sessionId") || "");
       const payload = listImageFiles(sessionId);
@@ -428,6 +436,91 @@ function sanitizeSessionFilter(value) {
   }
 
   return normalized;
+}
+
+function sanitizeSessionPath(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  const normalized = path.posix.normalize(raw.replace(/\\/g, "/")).replace(/^\.{1,2}\//g, "");
+  if (!normalized || normalized.includes("..")) {
+    return "";
+  }
+
+  const parts = normalized.split("/").filter(Boolean);
+  const sanitized = parts.map((part) => part.replace(/[^a-zA-Z0-9_-]/g, "")).filter(Boolean);
+  return sanitized.join("/");
+}
+
+function resolveSessionDir(sessionId) {
+  const safe = sanitizeSessionPath(sessionId);
+  if (!safe) {
+    return null;
+  }
+  const absPath = path.resolve(SESSIONS_ROOT, safe);
+  if (!absPath.startsWith(SESSIONS_ROOT + path.sep)) {
+    return null;
+  }
+  if (!fs.existsSync(absPath)) {
+    return null;
+  }
+  return absPath;
+}
+
+async function handleRenameSession(req, res) {
+  try {
+    const body = await readBody(req);
+    const payload = JSON.parse(body || "{}");
+    const fromId = sanitizeSessionPath(payload.from || "");
+    const toId = sanitizeSessionPath(payload.to || "");
+
+    if (!fromId || !toId) {
+      return sendJson(res, 400, { ok: false, error: "Invalid session name" });
+    }
+
+    const fromDir = resolveSessionDir(fromId);
+    if (!fromDir) {
+      return sendJson(res, 404, { ok: false, error: "Session not found" });
+    }
+
+    const toDir = path.resolve(SESSIONS_ROOT, toId);
+    if (!toDir.startsWith(SESSIONS_ROOT + path.sep)) {
+      return sendJson(res, 400, { ok: false, error: "Invalid destination" });
+    }
+    if (fs.existsSync(toDir)) {
+      return sendJson(res, 400, { ok: false, error: "Session already exists" });
+    }
+
+    ensureDir(path.dirname(toDir));
+    fs.renameSync(fromDir, toDir);
+    return sendJson(res, 200, { ok: true, sessionId: toId });
+  } catch (error) {
+    return sendJson(res, 500, { ok: false, error: error.message || "Rename failed" });
+  }
+}
+
+async function handleDeleteSession(req, res) {
+  try {
+    const body = await readBody(req);
+    const payload = JSON.parse(body || "{}");
+    const sessionId = sanitizeSessionPath(payload.sessionId || "");
+
+    if (!sessionId) {
+      return sendJson(res, 400, { ok: false, error: "Invalid session" });
+    }
+
+    const sessionDir = resolveSessionDir(sessionId);
+    if (!sessionDir) {
+      return sendJson(res, 404, { ok: false, error: "Session not found" });
+    }
+
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+    return sendJson(res, 200, { ok: true });
+  } catch (error) {
+    return sendJson(res, 500, { ok: false, error: error.message || "Delete failed" });
+  }
 }
 
 function listImageFiles(sessionId) {

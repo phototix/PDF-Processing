@@ -19,6 +19,7 @@ const elements = {
   uploadInput: document.getElementById("uploadInput"),
   uploadBtn: document.getElementById("uploadBtn"),
   newSessionAction: document.getElementById("newSessionAction"),
+  sessionManagerAction: document.getElementById("sessionManagerAction"),
   logoutAction: document.getElementById("logoutAction"),
   refreshBtn: document.getElementById("refreshBtn"),
   generateThumbsBtn: document.getElementById("generateThumbsBtn"),
@@ -38,6 +39,8 @@ const elements = {
   imagesInput: document.getElementById("imagesInput"),
   imagesGrid: document.getElementById("imagesGrid"),
   imagesModalCount: document.getElementById("imagesModalCount"),
+  sessionManagerGrid: document.getElementById("sessionManagerGrid"),
+  sessionManagerCount: document.getElementById("sessionManagerCount"),
   loginOverlay: document.getElementById("loginOverlay"),
   loginForm: document.getElementById("loginForm"),
   loginUsername: document.getElementById("loginUsername"),
@@ -140,6 +143,7 @@ function init() {
   elements.uploadBtn.addEventListener("click", () => elements.uploadInput.click());
   elements.uploadInput.addEventListener("change", handleUpload);
   elements.newSessionAction.addEventListener("click", startNewSession);
+  elements.sessionManagerAction.addEventListener("click", openSessionManager);
   elements.logoutAction.addEventListener("click", handleLogout);
 
   elements.refreshBtn.addEventListener("click", refreshPdfs);
@@ -242,6 +246,133 @@ function hideLoginOverlay() {
 function showLoginMessage(message) {
   if (elements.loginMessage) {
     elements.loginMessage.textContent = message || "";
+  }
+}
+
+async function openSessionManager() {
+  await loadSessionManager();
+  if (window.bootstrap && window.bootstrap.Modal) {
+    const modal = new window.bootstrap.Modal(document.getElementById("sessionManagerModal"));
+    modal.show();
+  }
+}
+
+async function loadSessionManager() {
+  if (!elements.sessionManagerGrid) {
+    return;
+  }
+
+  elements.sessionManagerGrid.innerHTML = "";
+  if (elements.sessionManagerCount) {
+    elements.sessionManagerCount.textContent = "Loading...";
+  }
+
+  try {
+    const payload = await apiFetch("/api/sessions");
+    const sessions = payload.items || [];
+
+    if (elements.sessionManagerCount) {
+      elements.sessionManagerCount.textContent = `${sessions.length} session${sessions.length === 1 ? "" : "s"}`;
+    }
+
+    if (!sessions.length) {
+      elements.sessionManagerGrid.innerHTML = "<div class=\"text-muted\">No sessions available.</div>";
+      return;
+    }
+
+    sessions.forEach((sessionId) => {
+      const card = document.createElement("div");
+      card.className = "session-card";
+
+      const title = document.createElement("div");
+      title.className = "session-card-title";
+      title.textContent = sessionId;
+
+      const actions = document.createElement("div");
+      actions.className = "session-card-actions";
+
+      const renameBtn = document.createElement("button");
+      renameBtn.className = "btn btn-sm btn-outline-secondary";
+      renameBtn.textContent = "Rename";
+      renameBtn.addEventListener("click", () => renameSession(sessionId));
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "btn btn-sm btn-outline-danger";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.addEventListener("click", () => deleteSession(sessionId));
+
+      actions.appendChild(renameBtn);
+      actions.appendChild(deleteBtn);
+
+      card.appendChild(title);
+      card.appendChild(actions);
+      elements.sessionManagerGrid.appendChild(card);
+    });
+  } catch (error) {
+    console.error("Failed to load sessions", error);
+    if (elements.sessionManagerCount) {
+      elements.sessionManagerCount.textContent = "0 sessions";
+    }
+    elements.sessionManagerGrid.innerHTML = "<div class=\"text-danger\">Failed to load sessions.</div>";
+  }
+}
+
+async function renameSession(sessionId) {
+  const { value: newName } = await Swal.fire({
+    title: "Rename Session",
+    input: "text",
+    inputLabel: "New session name",
+    inputValue: sessionId,
+    showCancelButton: true,
+    inputValidator: (value) => {
+      if (!value || !value.trim()) {
+        return "Please enter a session name.";
+      }
+      return null;
+    },
+  });
+
+  if (!newName || newName.trim() === sessionId) {
+    return;
+  }
+
+  try {
+    await apiFetch("/api/sessions/rename", {
+      method: "POST",
+      body: JSON.stringify({ from: sessionId, to: newName.trim() }),
+    });
+    showToast("Session renamed.", "success");
+    await refreshSessions();
+    await loadSessionManager();
+  } catch (error) {
+    showToast(error.message || "Failed to rename session.", "error");
+  }
+}
+
+async function deleteSession(sessionId) {
+  const result = await Swal.fire({
+    title: "Delete session?",
+    text: `This will delete PDF/sessions/${sessionId} and its files.`,
+    icon: "warning",
+    showCancelButton: true,
+    confirmButtonText: "Delete",
+    confirmButtonColor: "#dc2626",
+  });
+
+  if (!result.isConfirmed) {
+    return;
+  }
+
+  try {
+    await apiFetch("/api/sessions/delete", {
+      method: "POST",
+      body: JSON.stringify({ sessionId }),
+    });
+    showToast("Session deleted.", "success");
+    await refreshSessions();
+    await loadSessionManager();
+  } catch (error) {
+    showToast(error.message || "Failed to delete session.", "error");
   }
 }
 

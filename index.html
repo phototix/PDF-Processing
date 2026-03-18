@@ -17,7 +17,7 @@
 			crossorigin="anonymous"
 			referrerpolicy="no-referrer"
 		/>
-		<link rel="stylesheet" href="styles.css?version=0.0.33" />
+		<link rel="stylesheet" href="styles.css?version=0.0.34" />
 	</head>
 	<body>
 		<div id="loginOverlay" class="login-overlay d-none">
@@ -54,6 +54,11 @@
 						<li>
 							<button class="dropdown-item" type="button" id="newSessionAction">
 								<i class="fa-solid fa-folder-plus me-2"></i>New Session
+							</button>
+						</li>
+						<li>
+							<button class="dropdown-item" type="button" id="sessionManagerAction">
+								<i class="fa-solid fa-layer-group me-2"></i>Session Manager
 							</button>
 						</li>
 						<li><hr class="dropdown-divider" /></li>
@@ -143,6 +148,27 @@
 			&copy; 2026 WebbyPage. Author: Brandon Chong.
 		</footer>
 
+		<div class="modal fade" id="sessionManagerModal" tabindex="-1" aria-hidden="true">
+			<div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+				<div class="modal-content">
+					<div class="modal-header">
+						<div>
+							<h5 class="modal-title">Session Manager</h5>
+							<div class="small text-muted" id="sessionManagerCount">0 sessions</div>
+						</div>
+						<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+					</div>
+					<div class="modal-body">
+						<div class="text-muted mb-3">Rename or delete session folders.</div>
+						<div id="sessionManagerGrid" class="session-grid"></div>
+					</div>
+					<div class="modal-footer">
+						<button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
 		<div class="modal fade" id="previewModal" tabindex="-1" aria-hidden="true">
 			<div class="modal-dialog modal-xl modal-dialog-centered">
 					<div class="modal-content">
@@ -213,6 +239,6 @@
 		<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 		<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 		<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.js"></script>
-		<script src="app.js?version=0.0.33"></script>
+		<script src="app.js?version=0.0.34"></script>
 	</body>
 </html>
