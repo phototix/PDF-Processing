@@ -93,4 +93,4 @@ Pull requests are welcome! For major changes, please open an issue first to disc
 
 ## 📄 License
 
-Add your license of choice (e.g., MIT) and update this section accordingly.
+MIT — see `LICENSE`.

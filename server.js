@@ -642,7 +642,7 @@ async function handleGenerateThumbnail(req, res) {
     ];
 
     try {
-      await runProcess(gsPath, args);
+      await runProcess(gsPath, args, { timeoutMs: 120000, name: "thumbnail" });
     } catch (error) {
       logToFile("thumbnail:process-error", {
         file: inputPath,
@@ -652,6 +652,8 @@ async function handleGenerateThumbnail(req, res) {
       });
       throw error;
     }
+
+    assertNonEmptyFile(outputPath, "thumbnail");
 
     const thumbRelative = path.relative(ROOT, outputPath).replace(/\\/g, "/");
     return sendJson(res, 200, {
@@ -979,25 +981,55 @@ async function generateThumbnailForPath(inputPath) {
     inputPath,
   ];
 
-  await runProcess(gsPath, args);
+  await runProcess(gsPath, args, { timeoutMs: 120000, name: "thumbnail" });
+  assertNonEmptyFile(outputPath, "thumbnail");
   return outputPath;
 }
 
-function runProcess(command, args) {
+function assertNonEmptyFile(filePath, label) {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`${label} output file was not created`);
+  }
+
+  const stats = fs.statSync(filePath);
+  if (!stats.size) {
+    throw new Error(`${label} output file is empty`);
+  }
+}
+
+function runProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { windowsHide: true });
+    const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 300000;
+    const name = options.name || path.basename(command);
+    const child = spawn(command, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
 
     let stderr = "";
+    let stdout = "";
+
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          child.kill("SIGKILL");
+          reject(new Error(`${name} timed out after ${timeoutMs}ms`));
+        }, timeoutMs)
+      : null;
 
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
     });
 
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
     child.on("close", (code) => {
+      if (timer) {
+        clearTimeout(timer);
+      }
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(stderr || `Process failed with code ${code}`));
+        const details = stderr || stdout || `Process failed with code ${code}`;
+        reject(new Error(details));
       }
     });
   });
