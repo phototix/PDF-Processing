@@ -15,6 +15,7 @@ const CERT_PATH = path.join(ROOT, "localhost.pem");
 const KEY_PATH = path.join(ROOT, "localhost-key.pem");
 
 const PORT = 8080;
+const MAX_BODY_BYTES = 150 * 1024 * 1024;
 
 const ALLOWED_FILE_EXTS = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp", ".js", ".mjs"]);
 
@@ -738,11 +739,16 @@ function sendFile(res, filePath, contentType) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = "";
+    let rejected = false;
     req.on("data", (chunk) => {
+      if (rejected) {
+        return;
+      }
       data += chunk;
-      if (data.length > 50 * 1024 * 1024) {
+      if (data.length > MAX_BODY_BYTES) {
+        rejected = true;
+        req.pause();
         reject(new Error("Payload too large"));
-        req.destroy();
       }
     });
     req.on("end", () => resolve(data));
@@ -757,6 +763,11 @@ function sendJson(res, status, payload, headers = {}) {
 
 async function handleUpload(req, res) {
   try {
+    const contentLength = Number(req.headers["content-length"] || 0);
+    if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+      return sendJson(res, 413, { ok: false, error: "Payload too large" });
+    }
+
     const body = await readBody(req);
     const payload = JSON.parse(body || "{}");
     const sessionId = sanitizeSessionId(payload.sessionId || "") || "default";
@@ -791,6 +802,9 @@ async function handleUpload(req, res) {
 
     return sendJson(res, 200, { ok: true, items: saved });
   } catch (error) {
+    if (error?.message === "Payload too large") {
+      return sendJson(res, 413, { ok: false, error: "Payload too large" });
+    }
     return sendJson(res, 500, { ok: false, error: error.message || "Upload failed" });
   }
 }
