@@ -102,3 +102,7 @@ Pull requests are welcome! For major changes, please open an issue first to disc
 ## 📄 License
 
 MIT — see `LICENSE`.
+
+## © Copyright
+
+© 2026 WebbyPage. Author: Brandon Chong.
