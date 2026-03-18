@@ -899,7 +899,7 @@ async function handleImagesToPdf(req, res) {
     const a4PortraitHeight = Math.round(11.69 * targetDpi);
     const a4LandscapeWidth = a4PortraitHeight;
     const a4LandscapeHeight = a4PortraitWidth;
-    const resizeMode = fitMode === "fit" ? ">" : "^>";
+    const resizeMode = fitMode === "fit" ? ">" : "^";
 
     const magickEnv = buildMagickEnv();
     const dimensions = await Promise.all(
