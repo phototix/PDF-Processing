@@ -391,10 +391,29 @@ async function renameSession(sessionId) {
   }
 
   try {
-    await apiFetch("/api/sessions/rename", {
+    const payload = await apiFetch("/api/sessions/rename", {
       method: "POST",
       body: JSON.stringify({ from: sessionId, to: newName.trim() }),
     });
+    const nextSessionId = payload.sessionId || newName.trim();
+
+    if (state.sessionId === sessionId) {
+      setSessionId(nextSessionId);
+    }
+    if (elements.sessionFilter && elements.sessionFilter.value === sessionId) {
+      elements.sessionFilter.value = nextSessionId;
+    }
+    if (state.previewItem && typeof state.previewItem.relativePath === "string") {
+      const marker = `PDF/sessions/${sessionId}/`;
+      if (state.previewItem.relativePath.includes(marker)) {
+        const updatedPath = state.previewItem.relativePath.replace(marker, `PDF/sessions/${nextSessionId}/`);
+        state.previewItem = {
+          ...state.previewItem,
+          relativePath: updatedPath,
+          url: `/files/${updatedPath}`,
+        };
+      }
+    }
     showToast("Session renamed.", "success");
     await refreshSessions();
     await loadSessionManager();

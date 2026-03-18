@@ -415,10 +415,11 @@ function ensureSessionPathDir(sessionId) {
 
 function listPdfFiles(sessionId, filter) {
   const items = [];
-  const mode = (filter || "all").toLowerCase();
+  const mode = String(filter || "all");
+  const modeLower = mode.toLowerCase();
   const sessionFolders = listSessionFolders().items || [];
 
-  if (mode === "all" || mode === "project") {
+  if (modeLower === "all" || modeLower === "project") {
     const rootPdfs = listFilesShallow(ROOT, (filePath) => path.extname(filePath).toLowerCase() === ".pdf");
     rootPdfs.forEach((filePath) => {
       const relativePath = path.relative(ROOT, filePath).replace(/\\/g, "/");
@@ -426,7 +427,7 @@ function listPdfFiles(sessionId, filter) {
     });
   }
 
-  if (mode === "all" || mode === "library") {
+  if (modeLower === "all" || modeLower === "library") {
     const pdfFolder = listFiles(PDF_ROOT, (filePath) => {
       const ext = path.extname(filePath).toLowerCase();
       const isPdf = ext === ".pdf";
@@ -440,7 +441,7 @@ function listPdfFiles(sessionId, filter) {
     });
   }
 
-  if (mode === "all") {
+  if (modeLower === "all") {
     sessionFolders.forEach((session) => {
       const sessionDir = path.join(SESSIONS_ROOT, session);
       if (fs.existsSync(sessionDir)) {
@@ -451,7 +452,7 @@ function listPdfFiles(sessionId, filter) {
         });
       }
     });
-  } else if (mode === "session" && sessionId) {
+  } else if (modeLower === "session" && sessionId) {
     const sessionDir = path.join(SESSIONS_ROOT, sessionId);
     if (fs.existsSync(sessionDir)) {
       const sessionPdfs = listFiles(sessionDir, (filePath) => path.extname(filePath).toLowerCase() === ".pdf");
@@ -460,7 +461,7 @@ function listPdfFiles(sessionId, filter) {
         items.push(buildFileInfo(filePath, relativePath, "session"));
       });
     }
-  } else if (mode && !["project", "library"].includes(mode)) {
+  } else if (modeLower && !["project", "library", "session"].includes(modeLower)) {
     const sessionDir = path.join(SESSIONS_ROOT, mode);
     if (fs.existsSync(sessionDir)) {
       const sessionPdfs = listFiles(sessionDir, (filePath) => path.extname(filePath).toLowerCase() === ".pdf");
