@@ -208,6 +208,19 @@ async function handleKioskQuit() {
     return;
   }
 
+  if (window.Swal) {
+    Swal.fire({
+      title: "Closing...",
+      text: "Shutting down kiosk.",
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      showConfirmButton: false,
+      didOpen: () => {
+        Swal.showLoading();
+      },
+    });
+  }
+
   try {
     await apiFetch("/api/kiosk/quit", { method: "POST" });
   } catch (error) {
