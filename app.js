@@ -209,6 +209,12 @@ async function handleKioskQuit() {
   }
 
   try {
+    await apiFetch("/api/kiosk/quit", { method: "POST" });
+  } catch (error) {
+    console.warn("Failed to notify server to quit", error);
+  }
+
+  try {
     window.open("about:blank", "_self");
   } catch (error) {
     console.warn("Failed to open about:blank", error);

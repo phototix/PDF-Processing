@@ -4,6 +4,7 @@ setlocal
 set "PORT=8080"
 set "URL=https://localhost:%PORT%"
 set "KIOSK_URL=%URL%?kiosk=1"
+set "PID_FILE=%~dp0logs\kiosk.pid"
 
 echo Starting PDF Processing HTTPS Server on %URL%
 start "PDF Processing Server" /b "C:\node\node.exe" "server.js"
@@ -40,9 +41,11 @@ if not defined CHROME_EXE if exist "%ProgramFiles(x86)%\Google\Chrome\Applicatio
 if not defined CHROME_EXE if exist "%LocalAppData%\Google\Chrome\Application\chrome.exe" set "CHROME_EXE=%LocalAppData%\Google\Chrome\Application\chrome.exe"
 
 if defined EDGE_EXE (
-	start "" /wait "%EDGE_EXE%" --kiosk "%KIOSK_URL%" --edge-kiosk-type=fullscreen --no-first-run --disable-pinch
+	if exist "%PID_FILE%" del /f /q "%PID_FILE%"
+	powershell -NoProfile -Command "$p = Start-Process -FilePath '%EDGE_EXE%' -ArgumentList '--kiosk','%KIOSK_URL%','--edge-kiosk-type=fullscreen','--no-first-run','--disable-pinch' -PassThru; Set-Content -Path '%PID_FILE%' -Value $p.Id; $p.WaitForExit()"
 ) else if defined CHROME_EXE (
-	start "" /wait "%CHROME_EXE%" --kiosk "%KIOSK_URL%" --no-first-run --disable-pinch
+	if exist "%PID_FILE%" del /f /q "%PID_FILE%"
+	powershell -NoProfile -Command "$p = Start-Process -FilePath '%CHROME_EXE%' -ArgumentList '--kiosk','%KIOSK_URL%','--no-first-run','--disable-pinch' -PassThru; Set-Content -Path '%PID_FILE%' -Value $p.Id; $p.WaitForExit()"
 ) else (
 	echo Could not find Edge or Chrome. Opening default browser instead...
 	start "" "%KIOSK_URL%"

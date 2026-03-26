@@ -69,6 +69,10 @@ const server = https.createServer(
       return handleLogout(req, res);
     }
 
+    if (req.method === "POST" && pathname === "/api/kiosk/quit") {
+      return handleKioskQuit(req, res);
+    }
+
     if (req.method === "GET" && pathname.startsWith("/files/")) {
       const relativePath = pathname.replace(/^\/files\//, "");
       return handleFileServe(relativePath, res);
@@ -157,6 +161,43 @@ const server = https.createServer(
 server.listen(PORT, () => {
   console.log(`PDF Processing server running at https://localhost:${PORT}`);
 });
+
+async function handleKioskQuit(req, res) {
+  try {
+    const pidFile = path.join(LOG_DIR, "kiosk.pid");
+    let pid = null;
+
+    if (fs.existsSync(pidFile)) {
+      const raw = fs.readFileSync(pidFile, "utf8").trim();
+      const parsed = Number(raw);
+      if (Number.isInteger(parsed) && parsed > 0) {
+        pid = parsed;
+      }
+    }
+
+    if (pid) {
+      try {
+        await runProcess("taskkill", ["/PID", String(pid), "/T", "/F"], { timeoutMs: 15000, name: "taskkill" });
+      } catch (error) {
+        logToFile("kiosk:taskkill-error", { pid, error: error?.message || error });
+      }
+    }
+
+    if (fs.existsSync(pidFile)) {
+      fs.unlinkSync(pidFile);
+    }
+
+    sendJson(res, 200, { ok: true });
+
+    setTimeout(() => {
+      server.close(() => {
+        process.exit(0);
+      });
+    }, 250);
+  } catch (error) {
+    sendJson(res, 500, { ok: false, error: error.message || "Failed to quit kiosk" });
+  }
+}
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) {
