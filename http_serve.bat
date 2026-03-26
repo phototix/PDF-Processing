@@ -3,6 +3,7 @@ setlocal
 
 set "PORT=8080"
 set "URL=https://localhost:%PORT%"
+set "KIOSK_URL=%URL%?kiosk=1"
 
 echo Starting PDF Processing HTTPS Server on %URL%
 start "PDF Processing Server" /b "C:\node\node.exe" "server.js"
@@ -39,12 +40,12 @@ if not defined CHROME_EXE if exist "%ProgramFiles(x86)%\Google\Chrome\Applicatio
 if not defined CHROME_EXE if exist "%LocalAppData%\Google\Chrome\Application\chrome.exe" set "CHROME_EXE=%LocalAppData%\Google\Chrome\Application\chrome.exe"
 
 if defined EDGE_EXE (
-	start "" /wait "%EDGE_EXE%" --kiosk "%URL%" --edge-kiosk-type=fullscreen --no-first-run --disable-pinch
+	start "" /wait "%EDGE_EXE%" --kiosk "%KIOSK_URL%" --edge-kiosk-type=fullscreen --no-first-run --disable-pinch
 ) else if defined CHROME_EXE (
-	start "" /wait "%CHROME_EXE%" --kiosk "%URL%" --no-first-run --disable-pinch
+	start "" /wait "%CHROME_EXE%" --kiosk "%KIOSK_URL%" --no-first-run --disable-pinch
 ) else (
 	echo Could not find Edge or Chrome. Opening default browser instead...
-	start "" "%URL%"
+	start "" "%KIOSK_URL%"
 	goto :end
 )
 

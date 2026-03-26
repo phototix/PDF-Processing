@@ -40,34 +40,39 @@
 		<nav class="navbar navbar-expand-lg">
 			<div class="container-fluid px-4">
 				<a href="/"><span class="navbar-brand">PDF Processing Studio</span></a>
-				<div class="dropdown session-dropdown">
-					<button
-						class="btn session-badge dropdown-toggle"
-						type="button"
-						id="sessionMenuButton"
-						data-bs-toggle="dropdown"
-						aria-expanded="false"
-					>
-						Session: <span id="sessionId"></span>
+				<div class="d-flex align-items-center gap-2">
+					<button class="btn btn-sm btn-danger d-none" id="kioskQuitBtn" type="button" title="Exit kiosk">
+						<i class="fa-solid fa-power-off me-1"></i>Quit
 					</button>
-					<ul class="dropdown-menu dropdown-menu-end" aria-labelledby="sessionMenuButton">
-						<li>
-							<button class="dropdown-item" type="button" id="newSessionAction">
-								<i class="fa-solid fa-folder-plus me-2"></i>New Session
-							</button>
-						</li>
-						<li>
-							<button class="dropdown-item" type="button" id="sessionManagerAction">
-								<i class="fa-solid fa-layer-group me-2"></i>Session Manager
-							</button>
-						</li>
-						<li><hr class="dropdown-divider" /></li>
-						<li>
-							<button class="dropdown-item" type="button" id="logoutAction">
-								<i class="fa-solid fa-right-from-bracket me-2"></i>Logout
-							</button>
-						</li>
-					</ul>
+					<div class="dropdown session-dropdown">
+						<button
+							class="btn session-badge dropdown-toggle"
+							type="button"
+							id="sessionMenuButton"
+							data-bs-toggle="dropdown"
+							aria-expanded="false"
+						>
+							Session: <span id="sessionId"></span>
+						</button>
+						<ul class="dropdown-menu dropdown-menu-end" aria-labelledby="sessionMenuButton">
+							<li>
+								<button class="dropdown-item" type="button" id="newSessionAction">
+									<i class="fa-solid fa-folder-plus me-2"></i>New Session
+								</button>
+							</li>
+							<li>
+								<button class="dropdown-item" type="button" id="sessionManagerAction">
+									<i class="fa-solid fa-layer-group me-2"></i>Session Manager
+								</button>
+							</li>
+							<li><hr class="dropdown-divider" /></li>
+							<li>
+								<button class="dropdown-item" type="button" id="logoutAction">
+									<i class="fa-solid fa-right-from-bracket me-2"></i>Logout
+								</button>
+							</li>
+						</ul>
+					</div>
 				</div>
 			</div>
 		</nav>

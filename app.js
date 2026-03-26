@@ -8,6 +8,10 @@ const state = {
   highlightPath: null,
 };
 
+const kioskState = {
+  enabled: false,
+};
+
 let appInitialized = false;
 let loginFormInitialized = false;
 let authPromiseResolver = null;
@@ -48,6 +52,7 @@ const elements = {
   loginUsername: document.getElementById("loginUsername"),
   loginPassword: document.getElementById("loginPassword"),
   loginMessage: document.getElementById("loginMessage"),
+  kioskQuitBtn: document.getElementById("kioskQuitBtn"),
 };
 
 startApp();
@@ -142,6 +147,8 @@ function init() {
   state.sessionId = getSessionId();
   elements.sessionId.textContent = state.sessionId;
 
+  setupKioskMode();
+
   elements.uploadBtn.addEventListener("click", () => elements.uploadInput.click());
   elements.uploadInput.addEventListener("change", handleUpload);
   elements.newSessionAction.addEventListener("click", startNewSession);
@@ -165,6 +172,62 @@ function init() {
 
   refreshSessions();
   appInitialized = true;
+}
+
+function setupKioskMode() {
+  const params = new URLSearchParams(window.location.search || "");
+  kioskState.enabled = params.has("kiosk");
+  if (!kioskState.enabled) {
+    return;
+  }
+
+  document.body.classList.add("kiosk-mode");
+  if (elements.kioskQuitBtn) {
+    elements.kioskQuitBtn.classList.remove("d-none");
+    elements.kioskQuitBtn.addEventListener("click", handleKioskQuit);
+  }
+}
+
+async function handleKioskQuit() {
+  let confirmed = false;
+
+  if (window.Swal) {
+    const result = await Swal.fire({
+      title: "Exit kiosk?",
+      text: "This will close the kiosk window.",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Quit",
+    });
+    confirmed = result.isConfirmed;
+  } else {
+    confirmed = window.confirm("Exit kiosk?");
+  }
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    window.open("about:blank", "_self");
+  } catch (error) {
+    console.warn("Failed to open about:blank", error);
+  }
+
+  try {
+    window.close();
+  } catch (error) {
+    console.warn("Failed to close window", error);
+  }
+
+  setTimeout(() => {
+    if (window.Swal) {
+      Swal.fire({
+        icon: "info",
+        title: "If the window stays open, press Alt+F4 to exit kiosk.",
+      });
+    }
+  }, 400);
 }
 
 function setupLoginForm() {
