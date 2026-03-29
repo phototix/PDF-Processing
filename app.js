@@ -6,6 +6,10 @@ const state = {
   selected: new Set(),
   previewItem: null,
   highlightPath: null,
+  currentPage: 1,
+  itemsPerPage: 12,
+  activeThumbnails: new Map(),
+  lastCleanupTime: 0,
 };
 
 let appInitialized = false;
@@ -48,6 +52,13 @@ const elements = {
   loginUsername: document.getElementById("loginUsername"),
   loginPassword: document.getElementById("loginPassword"),
   loginMessage: document.getElementById("loginMessage"),
+  paginationContainer: document.getElementById("paginationContainer"),
+  paginationInfo: document.getElementById("paginationInfo"),
+  paginationControls: document.getElementById("paginationControls"),
+  paginationList: document.getElementById("paginationList"),
+  itemsPerPage: document.getElementById("itemsPerPage"),
+  cleanupMemoryBtn: document.getElementById("cleanupMemoryBtn"),
+  memoryInfo: document.getElementById("memoryInfo"),
 };
 
 startApp();
@@ -162,9 +173,69 @@ function init() {
   elements.previewRotateLeft.addEventListener("click", () => rotatePreview("ccw"));
   elements.previewRotateRight.addEventListener("click", () => rotatePreview("cw"));
   elements.arrangeConfirm.addEventListener("click", submitArrange);
+  
+  elements.itemsPerPage.addEventListener("change", handleItemsPerPageChange);
+  elements.itemsPerPage.value = state.itemsPerPage.toString();
+  
+  if (elements.cleanupMemoryBtn) {
+    elements.cleanupMemoryBtn.addEventListener("click", handleCleanupMemory);
+  }
+
+  setInterval(cleanupThumbnails, 30000);
+  setInterval(updateMemoryInfo, 5000);
+  updateMemoryInfo();
 
   refreshSessions();
   appInitialized = true;
+}
+
+function handleItemsPerPageChange() {
+  const newValue = parseInt(elements.itemsPerPage.value);
+  if (!isNaN(newValue) && newValue > 0) {
+    cleanupAllThumbnails();
+    state.itemsPerPage = newValue;
+    state.currentPage = 1;
+    renderGrid();
+  }
+}
+
+function handleCleanupMemory() {
+  cleanupAllThumbnails();
+  showToast("Memory cleaned up successfully", "success");
+  
+  if (window.gc) {
+    try {
+      window.gc();
+      showToast("Garbage collection triggered", "info");
+    } catch (e) {
+      console.debug("GC not available");
+    }
+  }
+  updateMemoryInfo();
+}
+
+function updateMemoryInfo() {
+  if (!elements.memoryInfo) return;
+  
+  try {
+    if (performance.memory) {
+      const memory = performance.memory;
+      const usedMB = Math.round(memory.usedJSHeapSize / 1048576);
+      const totalMB = Math.round(memory.totalJSHeapSize / 1048576);
+      const limitMB = Math.round(memory.jsHeapSizeLimit / 1048576);
+      const percentage = Math.round((usedMB / totalMB) * 100);
+      
+      let colorClass = "text-success";
+      if (percentage > 80) colorClass = "text-danger";
+      else if (percentage > 60) colorClass = "text-warning";
+      
+      elements.memoryInfo.innerHTML = `<span class="${colorClass}">${usedMB}MB / ${totalMB}MB (${percentage}%)</span>`;
+    } else {
+      elements.memoryInfo.textContent = "Memory API not available";
+    }
+  } catch (error) {
+    elements.memoryInfo.textContent = "Memory: N/A";
+  }
 }
 
 function setupLoginForm() {
@@ -545,10 +616,12 @@ async function apiFetch(path, options) {
 
 async function refreshPdfs() {
   try {
+    cleanupAllThumbnails();
     const sessionParam = elements.sessionFilter?.value || "all";
     const payload = await apiFetch(`/api/pdfs?sessionId=${state.sessionId}&filter=${encodeURIComponent(sessionParam)}`);
     state.pdfs = payload.items || [];
     state.selected.clear();
+    state.currentPage = 1;
     renderGrid();
     renderSelected();
   } catch (error) {
@@ -621,17 +694,136 @@ async function deriveSessionsFromPdfs() {
   return Array.from(sessions).sort((a, b) => a.localeCompare(b));
 }
 
+function getCurrentPageItems() {
+  const startIndex = (state.currentPage - 1) * state.itemsPerPage;
+  const endIndex = startIndex + state.itemsPerPage;
+  return state.pdfs.slice(startIndex, endIndex);
+}
+
+function getTotalPages() {
+  return Math.ceil(state.pdfs.length / state.itemsPerPage);
+}
+
+function updatePaginationInfo() {
+  const totalItems = state.pdfs.length;
+  const totalPages = getTotalPages();
+  const startIndex = (state.currentPage - 1) * state.itemsPerPage + 1;
+  const endIndex = Math.min(state.currentPage * state.itemsPerPage, totalItems);
+  
+  elements.paginationInfo.textContent = `Showing ${startIndex}-${endIndex} of ${totalItems} PDFs (Page ${state.currentPage} of ${totalPages})`;
+}
+
+function renderPaginationControls() {
+  const totalPages = getTotalPages();
+  elements.paginationList.innerHTML = "";
+  
+  if (totalPages <= 1) {
+    return;
+  }
+  
+  const createPageItem = (pageNum, text, isActive = false, isDisabled = false) => {
+    const li = document.createElement("li");
+    li.className = `page-item ${isActive ? "active" : ""} ${isDisabled ? "disabled" : ""}`;
+    
+    const a = document.createElement("a");
+    a.className = "page-link";
+    a.href = "#";
+    a.textContent = text;
+    
+    if (!isDisabled) {
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (pageNum !== state.currentPage) {
+          cleanupAllThumbnails();
+          state.currentPage = pageNum;
+          renderGrid();
+        }
+      });
+    }
+    
+    li.appendChild(a);
+    return li;
+  };
+  
+  elements.paginationList.appendChild(createPageItem(
+    state.currentPage - 1,
+    "Previous",
+    false,
+    state.currentPage === 1
+  ));
+  
+  const maxVisiblePages = 5;
+  let startPage = Math.max(1, state.currentPage - Math.floor(maxVisiblePages / 2));
+  let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+  
+  if (endPage - startPage + 1 < maxVisiblePages) {
+    startPage = Math.max(1, endPage - maxVisiblePages + 1);
+  }
+  
+  if (startPage > 1) {
+    elements.paginationList.appendChild(createPageItem(1, "1"));
+    if (startPage > 2) {
+      const li = document.createElement("li");
+      li.className = "page-item disabled";
+      const span = document.createElement("span");
+      span.className = "page-link";
+      span.textContent = "...";
+      li.appendChild(span);
+      elements.paginationList.appendChild(li);
+    }
+  }
+  
+  for (let i = startPage; i <= endPage; i++) {
+    elements.paginationList.appendChild(createPageItem(i, i.toString(), i === state.currentPage));
+  }
+  
+  if (endPage < totalPages) {
+    if (endPage < totalPages - 1) {
+      const li = document.createElement("li");
+      li.className = "page-item disabled";
+      const span = document.createElement("span");
+      span.className = "page-link";
+      span.textContent = "...";
+      li.appendChild(span);
+      elements.paginationList.appendChild(li);
+    }
+    elements.paginationList.appendChild(createPageItem(totalPages, totalPages.toString()));
+  }
+  
+  elements.paginationList.appendChild(createPageItem(
+    state.currentPage + 1,
+    "Next",
+    false,
+    state.currentPage === totalPages
+  ));
+}
+
 function renderGrid() {
   elements.grid.innerHTML = "";
 
   if (!state.pdfs.length) {
     elements.grid.innerHTML = `<div class="col-12 text-muted">No PDFs yet. Upload or refresh to see files.</div>`;
+    elements.paginationContainer.classList.add("d-none");
     return;
   }
 
+  elements.paginationContainer.classList.remove("d-none");
+  
+  const currentPageItems = getCurrentPageItems();
+  const totalPages = getTotalPages();
+  
+  if (state.currentPage > totalPages && totalPages > 0) {
+    state.currentPage = totalPages;
+    renderGrid();
+    return;
+  }
+
+  updatePaginationInfo();
+  renderPaginationControls();
+
   let highlightCard = null;
 
-  state.pdfs.forEach((item) => {
+  currentPageItems.forEach((item) => {
     const col = document.createElement("div");
     col.className = "col-sm-6 col-md-4 col-xl-3";
 
@@ -777,6 +969,9 @@ async function renderThumbnail(url, canvas) {
       canvas.classList.add("thumb-error");
       return;
     }
+    
+    state.activeThumbnails.set(canvas, Date.now());
+    
     const pdf = await pdfjsLib.getDocument(url).promise;
     const page = await pdf.getPage(1);
     const viewport = page.getViewport({ scale: 0.5 });
@@ -784,9 +979,56 @@ async function renderThumbnail(url, canvas) {
     canvas.width = viewport.width;
     canvas.height = viewport.height;
     await page.render({ canvasContext: context, viewport }).promise;
+    
+    page.cleanup();
   } catch (error) {
     canvas.classList.add("thumb-error");
   }
+}
+
+function cleanupThumbnails() {
+  const now = Date.now();
+  const cleanupThreshold = 5000;
+  
+  state.activeThumbnails.forEach((timestamp, canvas) => {
+    if (now - timestamp > cleanupThreshold) {
+      cleanupCanvas(canvas);
+      state.activeThumbnails.delete(canvas);
+    }
+  });
+  
+  state.lastCleanupTime = now;
+}
+
+function cleanupCanvas(canvas) {
+  if (!canvas || !(canvas instanceof HTMLCanvasElement)) return;
+  
+  try {
+    const context = canvas.getContext('2d');
+    if (context) {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    canvas.width = 1;
+    canvas.height = 1;
+    canvas.classList.remove('thumb-error');
+  } catch (error) {
+    console.debug('Canvas cleanup error:', error);
+  }
+}
+
+function cleanupAllThumbnails() {
+  state.activeThumbnails.forEach((timestamp, canvas) => {
+    cleanupCanvas(canvas);
+  });
+  state.activeThumbnails.clear();
+  state.lastCleanupTime = Date.now();
+  
+  const canvases = document.querySelectorAll('.pdf-thumb');
+  canvases.forEach(canvas => {
+    if (canvas instanceof HTMLCanvasElement && !state.activeThumbnails.has(canvas)) {
+      cleanupCanvas(canvas);
+    }
+  });
 }
 
 function openPreview(item) {
