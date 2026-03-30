@@ -1,0 +1,1 @@
+2026-03-30T05:00:50.820Z kiosk:taskkill-error {"pid":25640,"error":"ERROR: The process with PID 40312 (child process of PID 25640) could not be terminated.\r\nReason: The operation attempted is not supported.\r\r\n"}
